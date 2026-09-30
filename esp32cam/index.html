@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!--
+  Rover phone control UI. Served by esp32cam.ino at http://192.168.4.1/
+  This file must stay byte-identical to the INDEX_HTML string embedded in
+  esp32cam.ino (tested by tests/test_protocol.py).
+-->
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Rover</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#111;color:#ddd;font-family:system-ui,sans-serif}
+#video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+.tele{position:fixed;top:8px;left:8px;display:flex;gap:8px;z-index:5}
+.chip{background:rgba(0,0,0,.6);padding:4px 8px;border-radius:6px;font-size:13px}
+#joy{position:fixed;left:12px;bottom:12px;width:150px;height:150px;border-radius:50%;
+ background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.4);z-index:5;touch-action:none}
+#knob{position:absolute;left:62px;top:62px;width:26px;height:26px;border-radius:50%;
+ background:rgba(255,255,255,.85);pointer-events:none}
+.sliders{position:fixed;right:12px;bottom:12px;z-index:5;display:flex;flex-direction:column;gap:14px}
+.slider{display:flex;flex-direction:column;align-items:center;font-size:11px;gap:2px}
+input[type=range]{writing-mode:vertical-lr;direction:rtl;width:34px;height:140px}
+</style>
+</head><body>
+<img id="video" src="/stream">
+<div class="tele">
+  <div class="chip" id="cDist">-- cm</div>
+  <div class="chip" id="cBatt">-- V</div>
+  <div class="chip" id="cRadio">--</div>
+  <div class="chip" id="cLoop">-- ms</div>
+</div>
+<div id="joy"><div id="knob"></div></div>
+<div class="sliders">
+  <div class="slider">PAN<input id="pan" type="range" min="0" max="180" value="90"></div>
+  <div class="slider">TILT<input id="tilt" type="range" min="0" max="180" value="90"></div>
+</div>
+<script>
+var joy=document.getElementById('joy'),knob=document.getElementById('knob');
+var jx=0,jy=0,active=false,R=58,lastQ=null;
+var pan=document.getElementById('pan'),tilt=document.getElementById('tilt');
+function setKnob(){knob.style.left=(62+jx-13)+'px';knob.style.top=(62+jy-13)+'px';}
+function update(x,y){
+  var r=joy.getBoundingClientRect();
+  var dx=x-(r.left+r.width/2),dy=y-(r.top+r.height/2);
+  var len=Math.sqrt(dx*dx+dy*dy);
+  if(len>R){dx=dx/len*R;dy=dy/len*R;}
+  jx=dx;jy=dy;setKnob();send();
+}
+function send(){
+  var throttle=-Math.round(jy/R*255);
+  var steer=Math.round(jx/R*255);
+  var q=[throttle,steer,pan.value,tilt.value].join(',');
+  if(!active&&q===lastQ)return;
+  lastQ=q;
+  fetch('/cmd?t='+throttle+'&s='+steer+'&p='+pan.value+'&tl='+tilt.value);
+}
+joy.addEventListener('touchstart',function(e){update(e.touches[0].clientX,e.touches[0].clientY);active=true;e.preventDefault();},{passive:false});
+joy.addEventListener('touchmove',function(e){update(e.touches[0].clientX,e.touches[0].clientY);e.preventDefault();},{passive:false});
+joy.addEventListener('touchend',function(){active=false;jx=jy=0;setKnob();send();});
+joy.addEventListener('mousedown',function(e){update(e.clientX,e.clientY);active=true;e.preventDefault();});
+window.addEventListener('mousemove',function(e){if(active)update(e.clientX,e.clientY);});
+window.addEventListener('mouseup',function(){if(active){active=false;jx=jy=0;setKnob();send();}});
+pan.addEventListener('input',send);tilt.addEventListener('input',send);
+setInterval(function(){
+  fetch('/telemetry').then(function(r){return r.json()}).then(function(t){
+    document.getElementById('cDist').textContent=t.dist+' cm';
+    document.getElementById('cBatt').textContent=(t.batt/1000).toFixed(2)+' V';
+    document.getElementById('cRadio').textContent=t.radio?'RADIO OK':'NO RADIO';
+    document.getElementById('cLoop').textContent=t.loop+' ms';
+  }).catch(function(){});
+},500);
+</script>
+</body></html>
